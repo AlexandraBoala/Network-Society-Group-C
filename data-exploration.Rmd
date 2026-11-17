@@ -40,3 +40,70 @@ Explore the temporal dimension:
 summary(emails$time)
 ```
 
+We can see that the maximum number of seconds is 69444618, which is almost 804 days. 
+Thus, the emails were sent in up to 804 days. 
+
+We try to look at the number of emails per quarter.
+To do this, we first calculate the number of emails per day, then the number of emails in 92.25 days (one quarter)
+```{r}
+emails$day  <- emails$time / 86400
+emails$quarter <- floor(emails$day / 91.25) + 1      
+
+table(emails$quarter)                                 
+```
+We can see that emails for Q7 and Q8 are missing -> no emails for half an year!
+
+We try to make a network for each quarter:
+
+```{r}
+# Make a list of quarter numbers present in the data
+q <- sort(unique(emails$quarter))
+
+g_q <- lapply(q, function(q) {
+  # Keep only the emails sent in a quarter
+  d <- subset(emails, quarter == q)
+  # Build directed graph
+  g <- graph_from_data_frame(d[, c("from", "to", "time")], directed = TRUE)
+  # Sum weight of edges based on the number of emails 
+  E(g)$weight <- 1
+  simplify(g, edge.attr.comb = list(weight = "sum", time = "min"))
+})
+# Nice names
+names(g_q) <- paste0("Q", q)
+```
+
+Compare the statistics of each quarter:
+
+```{r}
+q_stats <- data.frame(
+  period      = names(g_q),
+  emails      = as.vector(table(emails$q)),
+  people      = sapply(g_q, vcount),
+  ties        = sapply(g_q, ecount),
+  density     = sapply(g_q, edge_density),
+  reciprocity = sapply(g_q, reciprocity),
+  clustering  = sapply(g_q, transitivity),
+  mean_dist   = sapply(g_q, mean_distance)
+)
+q_stats
+```
+
+For example, we can see that most emails were sent in Q3 (11403), and the least in Q9 (389). 
+
+Try to visualize with some plots (a bit unclear due to size):
+
+```{r}
+par(mfrow = c(3, 3), mar = c(1, 1, 2, 1))   # 3x3 grid, small margins
+
+for (n in names(g_q)) {
+  plot(g_q[[n]],
+       vertex.size = 3,
+       vertex.label = NA,
+       edge.arrow.size = 0.05,
+       edge.color = adjustcolor("grey40", alpha.f = 0.3),
+       main = n)
+}
+
+par(mfrow = c(1, 1))   
+```
+
