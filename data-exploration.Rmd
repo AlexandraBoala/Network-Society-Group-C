@@ -1,0 +1,42 @@
+---
+title: "data-exploration"
+author: "Alexandra Boala"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load the necessary packages:
+```{r}
+library(igraph)
+```
+
+Read the data:
+```{r}
+emails <- read.table("data/email-temporal-2026.txt", header = FALSE, 
+                     col.names = c("from", "to", "time"))
+
+g <- graph_from_data_frame(emails, directed = TRUE)
+g
+head(E(g)$time)
+```
+Very basic plot:
+```{r}
+# Give every edge (email) a weight of 1
+E(g)$weight <- 1
+
+# Merge all the edges between the same sender and the same receiver into one edge
+# Remove self loops
+# Weight is the number of emails from A to B
+g_simple <- simplify(g, edge.attr.comb = list(weight='sum', time = 'min'))
+
+plot(g_simple, vertex.size = 4, vertex.label = NA, edge.arrow.size=0.2)
+```
+Explore the temporal dimension:
+```{r}
+summary(emails$time)
+```
+
