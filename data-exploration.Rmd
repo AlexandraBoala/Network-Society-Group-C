@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ---
 title: "data-exploration"
 author: "Alexandra Boala"
@@ -174,3 +175,235 @@ head(nodes)
 We detect that there are 11 communities, with sizes from 2 people with 101 people. Out of these, 5 have under 15 participants, 5 under 100 and only one over 100. The modularity of 0.79 indicates that most email traffic stays within the group, so the company communicates in separate clusters.
 
 The nodes table represents data for each person in the group.
+=======
+---
+title: "data-exploration"
+author: "Alexandra Boala"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load the necessary packages:
+```{r}
+library(igraph)
+```
+
+Read the data:
+
+```{r}
+emails <- read.table("data/email-temporal-2026.txt", header = FALSE, 
+                     col.names = c("from", "to", "time"))
+
+g <- graph_from_data_frame(emails, directed = TRUE)
+g
+head(E(g)$time)
+```
+Very basic plot:
+```{r}
+# Give every edge (email) a weight of 1
+E(g)$weight <- 1
+
+# Merge all the edges between the same sender and the same receiver into one edge
+# Remove self loops
+# Weight is the number of emails from A to B
+g_simple <- simplify(g, edge.attr.comb = list(weight='sum', time = 'min'))
+
+plot(g_simple, vertex.size = 4, vertex.label = NA, edge.arrow.size=0.2)
+```
+Explore the temporal dimension:
+```{r}
+summary(emails$time)
+```
+
+We can see that the maximum number of seconds is 69444618, which is almost 804 days. 
+Thus, the emails were sent in up to 804 days. 
+
+We try to look at the number of emails per quarter.
+To do this, we first calculate the number of emails per day, then the number of emails in 92.25 days (one quarter)
+```{r}
+emails$day  <- emails$time / 86400
+emails$quarter <- floor(emails$day / 91.25) + 1      
+
+table(emails$quarter)                                 
+```
+We can see that emails for Q7 and Q8 are missing -> no emails for half an year!
+
+We try to make a network for each quarter:
+
+```{r}
+# Make a list of quarter numbers present in the data
+q <- sort(unique(emails$quarter))
+
+g_q <- lapply(q, function(q) {
+  # Keep only the emails sent in a quarter
+  d <- subset(emails, quarter == q)
+  # Build directed graph
+  g <- graph_from_data_frame(d[, c("from", "to", "time")], directed = TRUE)
+  # Sum weight of edges based on the number of emails 
+  E(g)$weight <- 1
+  simplify(g, edge.attr.comb = list(weight = "sum", time = "min"))
+})
+# Nice names
+names(g_q) <- paste0("Q", q)
+```
+
+Compare the statistics of each quarter:
+
+```{r}
+q_stats <- data.frame(
+  period      = names(g_q),
+  emails      = as.vector(table(emails$q)),
+  people      = sapply(g_q, vcount),
+  ties        = sapply(g_q, ecount),
+  density     = sapply(g_q, edge_density),
+  reciprocity = sapply(g_q, reciprocity),
+  clustering  = sapply(g_q, transitivity),
+  mean_dist   = sapply(g_q, mean_distance)
+)
+q_stats
+```
+
+For example, we can see that most emails were sent in Q3 (11403), and the least in Q9 (389). 
+
+Try to visualize with some plots (a bit unclear due to size):
+
+```{r}
+par(mfrow = c(3, 3), mar = c(1, 1, 2, 1))   # 3x3 grid, small margins
+
+for (n in names(g_q)) {
+  plot(g_q[[n]],
+       vertex.size = 3,
+       vertex.label = NA,
+       edge.arrow.size = 0.05,
+       edge.color = adjustcolor("grey40", alpha.f = 0.3),
+       main = n)
+}
+
+par(mfrow = c(1, 1))   
+```
+
+
+
+```{r}
+
+library(dplyr)
+
+
+emails$week <- floor(emails$day / 7)
+plot(table(emails$week), type = "h", xlab = "Week", ylab = "Emails")
+
+
+
+deg <- data.frame(
+  id        = V(g_simple)$name,
+  out_deg   = degree(g_simple, mode = "out"),
+  in_deg    = degree(g_simple, mode = "in"),
+  out_str   = strength(g_simple, mode = "out"),   # emails sent
+  in_str    = strength(g_simple, mode = "in"),    # emails received
+  between   = betweenness(g_simple, directed = TRUE),
+  pagerank  = page_rank(g_simple)$vector
+)
+head(deg[order(-deg$pagerank), ], 10)
+
+#check whether there are uniquely receivers/senders
+n_distinct(emails$from)
+n_distinct(emails$to)
+
+
+
+```
+When we look into the data per week we see that for week 0-74 there are multiple emails sent and for quartile 9, only in week 113 emails are sent. So maybe we should only look more deeply into quartile 1-6
+
+The data consists of 309 unique employees (nodes). There are 254 who are senders, so 55 employees who did not send an email during this period. There are 298 receivers, so 11 employees did not receive an email during this period   with a total of 61046 emails
+
+
+shared connections (triadic closure/transitivity), bridging ties, and communication frequency in a longitudinal email network.
+
+create a weighted graph for g1 - g9
+bridging ties
+transitivity (clustering)
+shared connections
+
+check weighted graphs
+
+```{r}
+
+for (n in names(g_q)) {
+
+  w <- E(g_q[[n]])$weight
+
+  plot(g_q[[n]],
+       vertex.size = 3,
+       vertex.label = NA,
+       edge.width = 1 + 5 * w / max(w),
+       edge.arrow.size = 0.05,
+       edge.color = adjustcolor("grey40", alpha.f = 0.3),
+       main = n)
+}
+
+
+```
+
+check for bridging ties and betweenness centrality
+```{r}
+
+#bridging ties
+
+for (n in names(g_q)) {
+
+  g <- g_q[[n]]
+
+  b <- bridges(g)
+
+  E(g)$color <- "grey"
+  E(g)[b]$color <- "red"
+
+  plot(g,
+       vertex.size = 4,
+       vertex.label = NA,
+       edge.width = 1,
+       edge.arrow.size = 0.05,
+       main = paste("Bridge edges -", n))
+}
+
+#betweenness centrality
+
+for (n in names(g_q)) {
+
+  g <- g_q[[n]]
+
+  bet <- betweenness(g, directed = TRUE)
+
+  V(g)$size <- 5 + 25 * bet / max(bet)
+
+  plot(g,
+       vertex.label = NA,
+       edge.arrow.size = 0.05,
+       main = paste("Node betweenness -", n))
+}
+
+#edge betweenness
+for (n in names(g_q)) {
+
+  g <- g_q[[n]]
+
+  eb <- edge_betweenness(g)
+
+  E(g)$width <- 1 + 5 * eb / max(eb)
+
+  plot(g,
+       vertex.size = 4,
+       vertex.label = NA,
+       edge.arrow.size = 0.05,
+       main = paste("Edge betweenness -", n))
+}
+
+
+
+```
+
+>>>>>>> c447972d1c65ebc842e0e467a6363640820afea7
