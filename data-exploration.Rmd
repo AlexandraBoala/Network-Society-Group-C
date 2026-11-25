@@ -10,11 +10,15 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 Load the necessary packages:
+
 ```{r}
 library(igraph)
+
+set.seed(42)
 ```
 
 Read the data:
+
 ```{r}
 emails <- read.table("data/email-temporal-2026.txt", header = FALSE, 
                      col.names = c("from", "to", "time"))
@@ -23,7 +27,9 @@ g <- graph_from_data_frame(emails, directed = TRUE)
 g
 head(E(g)$time)
 ```
+
 Very basic plot:
+
 ```{r}
 # Give every edge (email) a weight of 1
 E(g)$weight <- 1
@@ -33,25 +39,27 @@ E(g)$weight <- 1
 # Weight is the number of emails from A to B
 g_simple <- simplify(g, edge.attr.comb = list(weight='sum', time = 'min'))
 
-plot(g_simple, vertex.size = 4, vertex.label = NA, edge.arrow.size=0.2)
+plot(g_simple, vertex.size = 6, vertex.label = NA, edge.arrow.size=0.2)
 ```
+
 Explore the temporal dimension:
+
 ```{r}
 summary(emails$time)
 ```
 
-We can see that the maximum number of seconds is 69444618, which is almost 804 days. 
-Thus, the emails were sent in up to 804 days. 
+We can see that the maximum number of seconds is 69444618, which is almost 804 days. Thus, the emails were sent in up to 804 days.
 
-We try to look at the number of emails per quarter.
-To do this, we first calculate the number of emails per day, then the number of emails in 92.25 days (one quarter)
+We try to look at the number of emails per quarter. To do this, we first calculate the number of emails per day, then the number of emails in 92.25 days (one quarter)
+
 ```{r}
 emails$day  <- emails$time / 86400
 emails$quarter <- floor(emails$day / 91.25) + 1      
 
 table(emails$quarter)                                 
 ```
-We can see that emails for Q7 and Q8 are missing -> no emails for half an year!
+
+We can see that emails for Q7 and Q8 are missing -\> no emails for half an year!
 
 We try to make a network for each quarter:
 
@@ -77,7 +85,7 @@ Compare the statistics of each quarter:
 ```{r}
 q_stats <- data.frame(
   period      = names(g_q),
-  emails      = as.vector(table(emails$q)),
+  emails      = as.vector(table(emails$quarter)[as.character(q)]),
   people      = sapply(g_q, vcount),
   ties        = sapply(g_q, ecount),
   density     = sapply(g_q, edge_density),
@@ -88,12 +96,12 @@ q_stats <- data.frame(
 q_stats
 ```
 
-For example, we can see that most emails were sent in Q3 (11403), and the least in Q9 (389). 
+For example, we can see that most emails were sent in Q3 (11403), and the least in Q9 (389).
 
 Try to visualize with some plots (a bit unclear due to size):
 
 ```{r}
-par(mfrow = c(3, 3), mar = c(1, 1, 2, 1))   # 3x3 grid, small margins
+par(mfrow = c(3, 3), mar = c(1, 1, 2, 1))   
 
 for (n in names(g_q)) {
   plot(g_q[[n]],
@@ -107,3 +115,62 @@ for (n in names(g_q)) {
 par(mfrow = c(1, 1))   
 ```
 
+We can try to find the gap in data, so in the actual analysis we might only use data up to the cutoff point.
+
+```{r}
+emails$day_int <- floor(emails$time / 86400)
+per_day <- table(factor(emails$day_int, levels = 0:max(emails$day_int)))
+days    <- as.numeric(names(per_day))
+
+r      <- rle(as.vector(per_day) == 0)
+ends   <- cumsum(r$lengths)
+starts <- ends - r$lengths + 1
+i      <- which(r$values)[which.max(r$lengths[r$values])]
+
+gap_start <- days[starts[i]]
+gap_end   <- days[ends[i]]
+print(c(start_day = gap_start, end_day = gap_end, length = r$lengths[i]))
+
+plot(days, as.vector(per_day), type = "h", xlab = "Day", ylab = "Emails")
+abline(v = c(gap_start, gap_end), col = "red", lty = 2)
+```
+
+The gap is of 269 days and starts on day 528 and ends on day 796.
+
+We know that the data comes from a company with departments, but we got no names or official labels of those. However, we can try to come up with a clustering ourselves.
+
+For the clustering, I suggest to use Louvain clustering, which is part of the iGraph R package.
+
+How it works: <https://en.wikipedia.org/wiki/Louvain_method>. Basically, people are split into groups based on how many ties they have with those groups. At the end, each node is merged into a "large node", which represents their "department" in this case.
+
+This also uses weights; thus, pairs with more emails could be assumed to belong in the same department.
+
+```{r}
+# algo only works on undirected graph
+g_und <- as.undirected(g_simple, mode = "collapse",
+                       edge.attr.comb = list(weight = "sum", "ignore"))
+comm  <- cluster_louvain(g_und)
+
+first_seen <- tapply(c(emails$time, emails$time), c(emails$from, emails$to), min)
+last_seen  <- tapply(c(emails$time, emails$time), c(emails$from, emails$to), max)
+
+nodes <- data.frame(
+  id          = V(g_simple)$name,
+  out_degree  = degree(g_simple, mode = "out"),
+  in_degree   = degree(g_simple, mode = "in"),
+  emails_sent = strength(g_simple, mode = "out"),
+  emails_recv = strength(g_simple, mode = "in"),
+  betweenness = betweenness(g_simple, weights = NA),
+  constraint  = constraint(g_simple),
+  community   = as.vector(membership(comm))
+)
+nodes$active_days <- (last_seen[nodes$id] - first_seen[nodes$id]) / 86400
+modularity(comm)
+length(comm)
+sizes(comm)
+head(nodes)
+```
+
+We detect that there are 11 communities, with sizes from 2 people with 101 people. Out of these, 5 have under 15 participants, 5 under 100 and only one over 100. The modularity of 0.79 indicates that most email traffic stays within the group, so the company communicates in separate clusters.
+
+The nodes table represents data for each person in the group.
